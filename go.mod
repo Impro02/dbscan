@@ -1,3 +1,3 @@
-module github.com/kelindar/dbscan
+module dbscan
 
 go 1.22.0
