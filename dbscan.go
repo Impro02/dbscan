@@ -7,91 +7,60 @@ import (
 	"math"
 )
 
-type Point struct {
-	X float64
-	Y float64
-}
-
 type Input struct {
-	epsilon float64
-	minPoints int
-	points []Point
+    Epsilon   float64 `json:"epsilon"`
+    MinPoints int     `json:"min_points"`
+    Points    []Point `json:"points"`
 }
 
 type Output struct {
-	Noise []Point 
-	Clusters [][]Point
+	Labels []int  `json:"labels"`
+	Clusters int  `json:"clusters"`
 }
+type Point struct {
+	X float64  `json:"X"`
+	Y float64 `json:"Y"`
+}
+
 
 //export dbscan
 func dbscan(documentPtr *C.char) *C.char {
 	documentString := C.GoString(documentPtr)
 
-	var data map[string]interface{}
-
-	err := json.Unmarshal([]byte(documentString), &data)
-	if err != nil{
-		log.Fatal("Error parsing JSON:", err)
-	}
-
-	epsilon, epsilonOk := data["epsilon"].(float64)
-	minPointsFloat, minPointsOk := data["min_points"].(float64)
-	pointsInterface, pointsInterfaceOk := data["points"].([]interface{})
-
-	if !epsilonOk || !minPointsOk || !pointsInterfaceOk {
-		log.Fatal("Error parsing JSON: epsilon (float64), min_points (float64) and points ([]interface{}) are required!")
-	}
-
-	minPoints := int(minPointsFloat)
-
-	points := make([]Point, len(pointsInterface))
-	for i, pointInterface := range pointsInterface {
-		pointMap, ok := pointInterface.(map[string]interface{})
-		if !ok {
-			log.Fatal("point is not a map[string]interface{}")
-		}
-
-		x, ok := pointMap["X"].(float64)
-		if !ok {
-			log.Fatal("X is not a float64")
-		}
-
-		y, ok := pointMap["Y"].(float64)
-		if !ok {
-			log.Fatal("Y is not a float64")
-		}
-
-		points[i] = Point{X: x, Y: y}
-	}
+	var input Input
+    err := json.Unmarshal([]byte(documentString), &input)
+    if err != nil {
+        log.Fatal("error parsing JSON")
+    }
 	
-	visited := make(map[Point]bool)
-	clusters := make([][]Point, 0)
-	noise := make([]Point, 0)
+	visited := make([]bool, len(input.Points))
+	labels := make([]int, len(input.Points))
 
-	for _, point := range points {
-		if visited[point] {
+	clusterID := 0
+	for i, point := range input.Points {
+		if visited[i] {
 			continue
 		}
-		visited[point] = true
+		visited[i] = true
 
-		neighbors := regionQuery(points, point, epsilon)
-		if len(neighbors) < minPoints {
-			noise = append(noise, point)
+		neighbors := regionQuery(input.Points, point, input.Epsilon)
+		if len(neighbors) < input.MinPoints {
+			labels[i] = -1
 		} else {
-			cluster := []Point{point}
-			expandCluster(points, point, neighbors, epsilon, minPoints, visited, &cluster)
-			clusters = append(clusters, cluster)
+			clusterID++
+			expandCluster(input.Points, visited, labels, i, neighbors, clusterID, input.Epsilon, input.MinPoints)
 		}
 	}
 
 	output := &Output{
-		Noise: noise, 
-		Clusters: clusters,
+		Labels: labels, 
+		Clusters: clusterID,
 	}
 
 	outputBytes, err := json.Marshal(output)
+
 	if err != nil {
-		log.Fatal("Error marshaling JSON:", err)
+		log.Fatal("error marshaling JSON")
 	}
 
 	outputStr := string(outputBytes)
@@ -99,46 +68,40 @@ func dbscan(documentPtr *C.char) *C.char {
 	return C.CString(outputStr)
 }
 
-func regionQuery(points []Point, point Point, epsilon float64) []Point {
-	neighbors := []Point{}
+func regionQuery(points []Point, point Point, epsilon float64) []int {
+	neighbors := []int{}
 
-	for _, p := range points {
-		if distance(point, p) <= epsilon {
-			neighbors = append(neighbors, p)
+	for i, neighbor := range points {
+		if distance(point, neighbor) <= epsilon {
+			neighbors = append(neighbors, i)
 		}
 	}
 
 	return neighbors
 }
 
-func expandCluster(points []Point, point Point, neighbors []Point, epsilon float64, minPoints int, visited map[Point]bool, cluster *[]Point) {
-	for _, neighbor := range neighbors {
-		if !visited[neighbor] {
-			visited[neighbor] = true
+func expandCluster(points []Point, visited []bool, labels []int, pointIndex int, neighbors []int, clusterID int, epsilon float64, minPts int) {
+	labels[pointIndex] = clusterID
 
-			neighborNeighbors := regionQuery(points, neighbor, epsilon)
-			if len(neighborNeighbors) >= minPoints {
+	for _, neighborIndex := range neighbors {
+		if !visited[neighborIndex] {
+			visited[neighborIndex] = true
+
+			neighborNeighbors := regionQuery(points, points[neighborIndex], epsilon)
+
+			if len(neighborNeighbors) >= minPts {
 				neighbors = append(neighbors, neighborNeighbors...)
 			}
 		}
 
-		if !isInCluster(*cluster, neighbor) {
-			*cluster = append(*cluster, neighbor)
+		if labels[neighborIndex] == 0 || labels[neighborIndex] == -1 {
+			labels[neighborIndex] = clusterID
 		}
 	}
 }
 
 func distance(p1, p2 Point) float64 {
 	return math.Sqrt(math.Pow(p2.X-p1.X, 2) + math.Pow(p2.Y-p1.Y, 2))
-}
-
-func isInCluster(cluster []Point, point Point) bool {
-	for _, p := range cluster {
-		if p == point {
-			return true
-		}
-	}
-	return false
 }
 
 func main(){}
