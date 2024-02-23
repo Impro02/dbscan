@@ -20,17 +20,18 @@ The dbscan function takes a JSON string as input and returns a pointer to a JSON
 
 ```
 input = {
+    "algorithm" "kd_tree",
     "epsilon": 5.0,
     "min_points": 3,
     "points": [
-        {"X": 1, "Y": 1},
-        {"X": 2, "Y": 2},
-        {"X": 3, "Y": 3},
-        {"X": 10, "Y": 10},
-        {"X": 20, "Y": 20},
-        {"X": 21, "Y": 21},
-        {"X": 22, "Y": 22},
-        {"X": 100, "Y": 100},
+        {"Vec": (1, 1)},
+        {"Vec": (2, 2)},
+        {"Vec": (3, 3)},
+        {"Vec": (10, 10)},
+        {"Vec": (20, 20)},
+        {"Vec": (21, 21)},
+        {"Vec": (22, 22)},
+        {"Vec": (100, 100)},
     ]
 }
 ```
@@ -49,24 +50,9 @@ The output JSON will have the following structure:
 
 ```
 {
-    "Noise": [
-        {"X": 10, "Y": 10},
-        {"X": 100, "Y": 100},
-    ],
-    "Clusters": [
-        [
-            {"X": 1, "Y": 1},
-            {"X": 2, "Y": 2},
-            {"X": 3, "Y": 3},
-        ],
-        [
-            {"X": 20, "Y": 20},
-            {"X": 21, "Y": 21},
-            {"X": 22, "Y": 22},
-        ],
-    ],
+    "labels": [1, 1, 1, -1, 2, 2, 2, -1],
+    "clusters": 2,
 }
 ```
-
-Here, Noise is the list of noise points, and Clusters is the list of clusters, where each cluster is a list of points.
+The labels are returned in the same ordering as the given points. Noise points are labeled as -1 and are not counted as a cluster.
 
