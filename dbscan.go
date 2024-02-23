@@ -1,56 +1,131 @@
 package main
 
+import "C"
 import (
-	"fmt"
+	"encoding/json"
+	"log"
 	"math"
+
+	"github.com/hongshibao/go-kdtree"
 )
 
 type Input struct {
-    Epsilon   float64 `json:"epsilon"`
-    MinPoints int     `json:"min_points"`
-    Points    []Point `json:"points"`
+	Algorithm string            `json:"algorithm"`
+	Epsilon   float64           `json:"epsilon"`
+	MinPoints int               `json:"min_points"`
+	Points    []*EuclideanPoint `json:"points"`
 }
 
 type Output struct {
-	Labels []int  `json:"labels"`
-	Clusters int  `json:"clusters"`
+	Labels   []int `json:"labels"`
+	Clusters int   `json:"clusters"`
 }
-type Point struct {
-	Vect []float64
-	Visited bool
+
+type EuclideanPoint struct {
+	kdtree.Point
+	Vec       []float64
+	Visited   bool
 	ClusterId int
 }
 
+func (p *EuclideanPoint) Dim() int {
+	return len(p.Vec)
+}
 
-func dbscan(points []*Point, epsilon float64, minPoints int) []int {
-		clusterID := 0
+func (p *EuclideanPoint) GetValue(dim int) float64 {
+	return p.Vec[dim]
+}
+
+func (p *EuclideanPoint) Distance(other kdtree.Point) float64 {
+	var ret float64
+	for i := 0; i < p.Dim(); i++ {
+		tmp := p.GetValue(i) - other.GetValue(i)
+		ret += tmp * tmp
+	}
+	return math.Sqrt(ret)
+}
+
+func (p *EuclideanPoint) PlaneDistance(val float64, dim int) float64 {
+	tmp := p.GetValue(dim) - val
+	return tmp * tmp
+}
+
+//export dbscan
+func dbscan(documentPtr *C.char) *C.char {
+	documentString := C.GoString(documentPtr)
+
+	var input Input
+	err := json.Unmarshal([]byte(documentString), &input)
+	if err != nil {
+		log.Fatal("error parsing JSON")
+	}
+
+	labels, clusterID := dbscanGo(input.Points, input.Algorithm, input.Epsilon, input.MinPoints)
+
+	output := &Output{
+		Labels:   labels,
+		Clusters: clusterID,
+	}
+
+	outputBytes, err := json.Marshal(output)
+
+	if err != nil {
+		log.Fatal("error marshaling JSON")
+	}
+
+	outputStr := string(outputBytes)
+
+	return C.CString(outputStr)
+}
+
+func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPoints int) ([]int, int) {
+	var kdTree *kdtree.KDTree
+	if algorithm == "kd_tree" {
+		kdPoints := make([]kdtree.Point, 0)
+		for _, p := range points {
+			kdPoints = append(kdPoints, p)
+		}
+
+		kdTree = kdtree.NewKDTree(kdPoints)
+	}
+
+	clusterID := 0
 	for _, point := range points {
 		if point.Visited {
 			continue
 		}
 		point.Visited = true
 
-		neighbors := regionQuery(points, point, epsilon)
-		if len(neighbors) < minPoints -1 {
+		var neighbors = []*EuclideanPoint{}
+		switch algorithm {
+		case "kd_tree":
+			neighbors = regionQueryKDTree(kdTree, point, epsilon, minPoints)
+		case "brute":
+			neighbors = regionQueryBruteForce(points, point, epsilon)
+		default:
+			log.Fatal("invalid algorithm")
+		}
+
+		if len(neighbors) < minPoints-1 {
 			point.ClusterId = -1
 		} else {
 			clusterID++
-			expandCluster(points, point, neighbors, clusterID, epsilon, minPoints)
+			expandCluster(kdTree, points, point, neighbors, clusterID, epsilon, minPoints, algorithm)
 		}
 	}
 
-	clusterIds := make([]int, 0, len(points))
-    for _, point := range points {
-        clusterIds = append(clusterIds, point.ClusterId)
-    }
-    return clusterIds
+	clusterIDs := make([]int, 0, len(points))
+	for _, point := range points {
+		clusterIDs = append(clusterIDs, point.ClusterId)
+	}
+	return clusterIDs, clusterID
 }
 
-func regionQuery(points []*Point, point *Point, epsilon float64) []*Point {
-	neighbors := make([]*Point, 0)
+func regionQueryBruteForce(points []*EuclideanPoint, point *EuclideanPoint, epsilon float64) []*EuclideanPoint {
+	neighbors := make([]*EuclideanPoint, 0)
 
 	for _, neighbor := range points {
-		if point != neighbor && distance(*point, *neighbor) <= epsilon {
+		if point != neighbor && point.Distance(neighbor) <= epsilon {
 			neighbors = append(neighbors, neighbor)
 		}
 	}
@@ -58,16 +133,40 @@ func regionQuery(points []*Point, point *Point, epsilon float64) []*Point {
 	return neighbors
 }
 
-func expandCluster(points []*Point, point *Point,  neighbors []*Point, clusterID int, epsilon float64, minPts int) {
+func regionQueryKDTree(kdTree *kdtree.KDTree, point *EuclideanPoint, radius float64, k int) []*EuclideanPoint {
+	kdPoints := kdTree.KNN(point, k+1)
+	points := make([]*EuclideanPoint, 0)
+	for _, p := range kdPoints {
+		points = append(points, p.(*EuclideanPoint))
+	}
+
+	neighbors := make([]*EuclideanPoint, 0)
+	for _, neighbor := range points {
+		if point != neighbor && point.Distance(neighbor) <= radius {
+			neighbors = append(neighbors, neighbor)
+		}
+	}
+	return neighbors
+}
+
+func expandCluster(kdTree *kdtree.KDTree, points []*EuclideanPoint, point *EuclideanPoint, neighbors []*EuclideanPoint, clusterID int, epsilon float64, minPts int, algorithm string) {
 	point.ClusterId = clusterID
 
 	for i := 0; i < len(neighbors); i++ {
 		if !neighbors[i].Visited {
 			neighbors[i].Visited = true
 
-			neighborNeighbors := regionQuery(points, neighbors[i], epsilon)
+			var neighborNeighbors = []*EuclideanPoint{}
+			switch algorithm {
+			case "kd_tree":
+				neighborNeighbors = regionQueryKDTree(kdTree, neighbors[i], epsilon, minPts)
+			case "brute":
+				neighborNeighbors = regionQueryBruteForce(points, neighbors[i], epsilon)
+			default:
+				log.Fatal("invalid algorithm")
+			}
 
-			if len(neighborNeighbors) >= minPts -1 {
+			if len(neighborNeighbors) >= minPts-1 {
 				neighbors = union(neighbors, neighborNeighbors)
 			}
 		}
@@ -78,51 +177,20 @@ func expandCluster(points []*Point, point *Point,  neighbors []*Point, clusterID
 	}
 }
 
-func union(a, b []*Point) []*Point {
-    m := make(map[*Point]bool)
+func union(a, b []*EuclideanPoint) []*EuclideanPoint {
+	m := make(map[*EuclideanPoint]bool)
 
-    for _, item := range a {
-        m[item] = true
-    }
-
-    for _, item := range b {
-        if _, ok := m[item]; !ok {
-            a = append(a, item)
-        }
-    }
-
-    return a
-}
-
-func distance(p1, p2 Point) float64 {
-	var ret float64
-	for i := 0; i < len(p1.Vect); i++ {
-		tmp := p1.Vect[i] - p2.Vect[i]
-		ret += tmp * tmp
+	for _, item := range a {
+		m[item] = true
 	}
-	return math.Sqrt(ret)
+
+	for _, item := range b {
+		if _, ok := m[item]; !ok {
+			a = append(a, item)
+		}
+	}
+
+	return a
 }
 
-func main() {
-	points := []*Point{
-		{Vect: []float64{6, 6}},
-        {Vect: []float64{1, 1}},
-        {Vect: []float64{2, 2}},
-		{Vect: []float64{10, 10}},
-		{Vect: []float64{32, 32}},
-		{Vect: []float64{33, 33}},
-		{Vect: []float64{45, 45}},
-		{Vect: []float64{31, 31}},
-		{Vect: []float64{100, 100}},
-        {Vect: []float64{3, 3}},
-    }
-
-    eps := 5.0
-    minPts := 3
-
-    clusters := dbscan(points, eps, minPts)
-
-    for i := range clusters {
-        fmt.Printf("Cluster ID: %d", i)
-    }
-}
+func main() {}
