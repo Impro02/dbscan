@@ -6,7 +6,7 @@ import (
 	"log"
 	"math"
 
-	"github.com/hongshibao/go-kdtree"
+	"github.com/Impro02/kdtree"
 )
 
 type Input struct {
@@ -28,6 +28,10 @@ type EuclideanPoint struct {
 	ClusterId int
 }
 
+func (p *EuclideanPoint) Vector() []float64 {
+	return p.Vec
+}
+
 func (p *EuclideanPoint) Dim() int {
 	return len(p.Vec)
 }
@@ -43,11 +47,6 @@ func (p *EuclideanPoint) Distance(other kdtree.Point) float64 {
 		ret += tmp * tmp
 	}
 	return math.Sqrt(ret)
-}
-
-func (p *EuclideanPoint) PlaneDistance(val float64, dim int) float64 {
-	tmp := p.GetValue(dim) - val
-	return tmp * tmp
 }
 
 //export dbscan
@@ -79,14 +78,14 @@ func dbscan(documentPtr *C.char) *C.char {
 }
 
 func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPoints int) ([]int, int) {
-	var kdTree *kdtree.KDTree
+	var kdTree *kdtree.Node
 	if algorithm == "kd_tree" {
 		kdPoints := make([]kdtree.Point, 0)
 		for _, p := range points {
 			kdPoints = append(kdPoints, p)
 		}
 
-		kdTree = kdtree.NewKDTree(kdPoints)
+		kdTree = kdtree.BuildKDTree(kdPoints, 0)
 	}
 
 	clusterID := 0
@@ -99,7 +98,7 @@ func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPo
 		var neighbors = []*EuclideanPoint{}
 		switch algorithm {
 		case "kd_tree":
-			neighbors = regionQueryKDTree(kdTree, point, epsilon, minPoints)
+			neighbors = regionQueryKDTree(kdTree, point, epsilon)
 		case "brute":
 			neighbors = regionQueryBruteForce(points, point, epsilon)
 		default:
@@ -133,23 +132,18 @@ func regionQueryBruteForce(points []*EuclideanPoint, point *EuclideanPoint, epsi
 	return neighbors
 }
 
-func regionQueryKDTree(kdTree *kdtree.KDTree, point *EuclideanPoint, radius float64, k int) []*EuclideanPoint {
-	kdPoints := kdTree.KNN(point, k+1)
-	points := make([]*EuclideanPoint, 0)
-	for _, p := range kdPoints {
-		points = append(points, p.(*EuclideanPoint))
+func regionQueryKDTree(kdTree *kdtree.Node, point *EuclideanPoint, radius float64) []*EuclideanPoint {
+	kdPoints := kdTree.NeighborsWithinRadius(point, radius)
+
+	neighbors := make([]*EuclideanPoint, len(kdPoints))
+	for i, p := range kdPoints {
+		neighbors[i] = p.(*EuclideanPoint)
 	}
 
-	neighbors := make([]*EuclideanPoint, 0)
-	for _, neighbor := range points {
-		if point != neighbor && point.Distance(neighbor) <= radius {
-			neighbors = append(neighbors, neighbor)
-		}
-	}
 	return neighbors
 }
 
-func expandCluster(kdTree *kdtree.KDTree, points []*EuclideanPoint, point *EuclideanPoint, neighbors []*EuclideanPoint, clusterID int, epsilon float64, minPts int, algorithm string) {
+func expandCluster(kdTree *kdtree.Node, points []*EuclideanPoint, point *EuclideanPoint, neighbors []*EuclideanPoint, clusterID int, epsilon float64, minPts int, algorithm string) {
 	point.ClusterId = clusterID
 
 	for i := 0; i < len(neighbors); i++ {
@@ -159,7 +153,7 @@ func expandCluster(kdTree *kdtree.KDTree, points []*EuclideanPoint, point *Eucli
 			var neighborNeighbors = []*EuclideanPoint{}
 			switch algorithm {
 			case "kd_tree":
-				neighborNeighbors = regionQueryKDTree(kdTree, neighbors[i], epsilon, minPts)
+				neighborNeighbors = regionQueryKDTree(kdTree, neighbors[i], epsilon)
 			case "brute":
 				neighborNeighbors = regionQueryBruteForce(points, neighbors[i], epsilon)
 			default:

@@ -1,8 +1,13 @@
 import ctypes
 import json
+import platform
 from unittest import TestCase
 
-library = ctypes.cdll.LoadLibrary("./dbscan.so")
+# Load the shared library
+if platform.system() == "Windows":
+    library = ctypes.cdll.LoadLibrary("./dbscan.dll")
+else:
+    library = ctypes.cdll.LoadLibrary("./dbscan.so")
 
 
 class TestDbscan(TestCase):
