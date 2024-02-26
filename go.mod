@@ -3,7 +3,7 @@ module github.com/Impro02/dbscan
 go 1.22.0
 
 require (
-	github.com/Impro02/kdtree v0.2.2
+	github.com/Impro02/kdtree v0.2.6
 	github.com/stretchr/testify v1.8.4
 )
 
