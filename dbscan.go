@@ -95,15 +95,7 @@ func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPo
 		}
 		point.Visited = true
 
-		var neighbors = []*EuclideanPoint{}
-		switch algorithm {
-		case "kd_tree":
-			neighbors = regionQueryKDTree(kdTree, point, epsilon)
-		case "brute":
-			neighbors = regionQueryBruteForce(points, point, epsilon)
-		default:
-			log.Fatal("invalid algorithm")
-		}
+		neighbors := findNeighbors(kdTree, points, point, epsilon, algorithm)
 
 		if len(neighbors) < minPoints-1 {
 			point.ClusterId = -1
@@ -118,6 +110,20 @@ func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPo
 		clusterIDs = append(clusterIDs, point.ClusterId)
 	}
 	return clusterIDs, clusterID
+}
+
+func findNeighbors(kdTree *kdtree.Node, points []*EuclideanPoint, point *EuclideanPoint, epsilon float64, algorithm string) []*EuclideanPoint {
+	var neighbors = []*EuclideanPoint{}
+	switch algorithm {
+	case "kd_tree":
+		neighbors = regionQueryKDTree(kdTree, point, epsilon)
+	case "brute":
+		neighbors = regionQueryBruteForce(points, point, epsilon)
+	default:
+		log.Fatal("invalid algorithm")
+	}
+
+	return neighbors
 }
 
 func regionQueryBruteForce(points []*EuclideanPoint, point *EuclideanPoint, epsilon float64) []*EuclideanPoint {
@@ -147,26 +153,19 @@ func expandCluster(kdTree *kdtree.Node, points []*EuclideanPoint, point *Euclide
 	point.ClusterId = clusterID
 
 	for i := 0; i < len(neighbors); i++ {
-		if !neighbors[i].Visited {
-			neighbors[i].Visited = true
+		neighbor := neighbors[i]
+		if !neighbor.Visited {
+			neighbor.Visited = true
 
-			var neighborNeighbors = []*EuclideanPoint{}
-			switch algorithm {
-			case "kd_tree":
-				neighborNeighbors = regionQueryKDTree(kdTree, neighbors[i], epsilon)
-			case "brute":
-				neighborNeighbors = regionQueryBruteForce(points, neighbors[i], epsilon)
-			default:
-				log.Fatal("invalid algorithm")
-			}
+			neighborNeighbors := findNeighbors(kdTree, points, neighbor, epsilon, algorithm)
 
 			if len(neighborNeighbors) >= minPts-1 {
 				neighbors = union(neighbors, neighborNeighbors)
 			}
 		}
 
-		if neighbors[i].ClusterId == 0 || neighbors[i].ClusterId == -1 {
-			neighbors[i].ClusterId = clusterID
+		if neighbor.ClusterId == 0 || neighbor.ClusterId == -1 {
+			neighbor.ClusterId = clusterID
 		}
 	}
 }
