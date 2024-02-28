@@ -1,6 +1,8 @@
 package main
 
 import (
+	"math"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +26,7 @@ func TestDbscanGoBrute(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "brute", 5.0, 3, 1)
+	labels, clusters := dbscanGo(points, "brute", math.Pow(5.0, 2), 3, 3)
 
 	expectedClusters := 3
 	expectedLabels := []int{1, 1, 1, 1, 2, 1, 3, 1, 3, 2, 2, 3, 2, -1}
@@ -51,7 +53,7 @@ func TestDbscanGoBruteOnlyNoise(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "brute", 0.5, 3, 1)
+	labels, clusters := dbscanGo(points, "brute", math.Pow(0.5, 2), 3, 2)
 
 	expectedClusters := 0
 	expectedLabels := []int{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
@@ -78,7 +80,7 @@ func TestDbscanGoKdTree(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "kd_tree", 5.0, 3, 1)
+	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(5.0, 2), 3, 2)
 
 	expectedClusters := 3
 	expectedLabels := []int{1, 1, 1, 1, 2, 1, 3, 1, 3, 2, 2, 3, 2, -1}
@@ -105,10 +107,40 @@ func TestDbscanGoKdTreeOnlyNoise(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "kd_tree", 0.5, 3, 1)
+	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(0.5, 2), 3, 1)
 
 	expectedClusters := 0
 	expectedLabels := []int{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
+
+	assert.Equal(t, expectedClusters, clusters)
+	assert.Equal(t, expectedLabels, labels)
+}
+
+func TestDbscanGoKdTreeLargeDataset(t *testing.T) {
+	// Seed the random number generator with a constant value.
+	r := rand.New(rand.NewSource(42))
+
+	// Define the centroids.
+	centroids := []EuclideanPoint{
+		{Vec: []float64{0.1, 0.1}},
+		{Vec: []float64{0.1, 0.9}},
+		{Vec: []float64{0.5, 0.5}},
+		{Vec: []float64{0.9, 0.1}},
+		{Vec: []float64{0.9, 0.9}},
+	}
+
+	points := []*EuclideanPoint{}
+	for i := 0; i < 100000; i++ {
+		centroid := centroids[r.Intn(len(centroids))]
+		x := centroid.GetValue(0) + r.NormFloat64()*0.1
+		y := centroid.GetValue(1) + r.NormFloat64()*0.1
+		points = append(points, &EuclideanPoint{Vec: []float64{x, y}})
+	}
+
+	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(0.1, 2), 3, 2)
+
+	expectedClusters := 3
+	expectedLabels := []int{1, 1, 1, 1, 2, 1, 3, 1, 3, 2, 2, 3, 2, -1}
 
 	assert.Equal(t, expectedClusters, clusters)
 	assert.Equal(t, expectedLabels, labels)
