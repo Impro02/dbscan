@@ -14,11 +14,17 @@ type Input struct {
 	MinPoints int               `json:"min_points"`
 	LeafSize  int               `json:"leaf_size"`
 	Points    []*EuclideanPoint `json:"points"`
+	Workers   int               `json:"workers"`
 }
 
 type Output struct {
 	Labels   []int `json:"labels"`
 	Clusters int   `json:"clusters"`
+}
+
+type PointAndNeighbors struct {
+	Point     *EuclideanPoint
+	Neighbors []*EuclideanPoint
 }
 
 type EuclideanPoint struct {
@@ -59,7 +65,7 @@ func dbscan(documentPtr *C.char) *C.char {
 		log.Fatal("error parsing JSON")
 	}
 
-	labels, clusterID := dbscanGo(input.Points, input.Algorithm, input.Epsilon, input.MinPoints, input.LeafSize)
+	labels, clusterID := dbscanGo(input.Points, input.Algorithm, input.Epsilon, input.MinPoints, input.LeafSize, input.Workers)
 
 	output := &Output{
 		Labels:   labels,
@@ -77,7 +83,7 @@ func dbscan(documentPtr *C.char) *C.char {
 	return C.CString(outputStr)
 }
 
-func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPoints int, leafSize int) ([]int, int) {
+func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPoints int, leafSize int, workers int) ([]int, int) {
 	var kdTree *kdtree.Node
 	if algorithm == "kd_tree" {
 		kdPoints := make([]kdtree.Point, 0)
@@ -88,6 +94,35 @@ func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPo
 		kdTree = kdtree.BuildKDTree(kdPoints, 0, leafSize)
 	}
 
+	// Create a channel to send points to workers.
+	pointsChan := make(chan *EuclideanPoint, len(points))
+
+	// Create a channel to receive neighbors from workers.
+	neighborsChan := make(chan PointAndNeighbors, len(points))
+
+	// Start a number of workers.
+	for i := 0; i < workers; i++ {
+		go func() {
+			for point := range pointsChan {
+				neighbors := findNeighbors(kdTree, points, point, epsilon, algorithm)
+				neighborsChan <- PointAndNeighbors{Point: point, Neighbors: neighbors}
+			}
+		}()
+	}
+
+	// Send all points to the workers.
+	for _, point := range points {
+		pointsChan <- point
+	}
+	close(pointsChan)
+
+	// Receive all computedNeighbors from the workers.
+	computedNeighbors := make(map[*EuclideanPoint][]*EuclideanPoint, len(points))
+	for range points {
+		pn := <-neighborsChan
+		computedNeighbors[pn.Point] = pn.Neighbors
+	}
+
 	clusterID := 0
 	for _, point := range points {
 		if point.Visited {
@@ -95,13 +130,13 @@ func dbscanGo(points []*EuclideanPoint, algorithm string, epsilon float64, minPo
 		}
 		point.Visited = true
 
-		neighbors := findNeighbors(kdTree, points, point, epsilon, algorithm)
+		neighbors := computedNeighbors[point]
 
 		if len(neighbors) < minPoints-1 {
 			point.ClusterId = -1
 		} else {
 			clusterID++
-			expandCluster(kdTree, points, point, neighbors, clusterID, epsilon, minPoints, algorithm)
+			expandCluster(kdTree, points, point, computedNeighbors, clusterID, epsilon, minPoints, algorithm)
 		}
 	}
 
@@ -149,18 +184,25 @@ func regionQueryKDTree(kdTree *kdtree.Node, point *EuclideanPoint, radius float6
 	return neighbors
 }
 
-func expandCluster(kdTree *kdtree.Node, points []*EuclideanPoint, point *EuclideanPoint, neighbors []*EuclideanPoint, clusterID int, epsilon float64, minPts int, algorithm string) {
+func expandCluster(kdTree *kdtree.Node, points []*EuclideanPoint, point *EuclideanPoint, computedNeighbors map[*EuclideanPoint][]*EuclideanPoint, clusterID int, epsilon float64, minPts int, algorithm string) {
 	point.ClusterId = clusterID
 
-	for i := 0; i < len(neighbors); i++ {
-		neighbor := neighbors[i]
+	neighbors := computedNeighbors[point]
+
+	queue := make([]*EuclideanPoint, len(neighbors))
+	copy(queue, neighbors)
+
+	for len(queue) > 0 {
+		neighbor := queue[0]
+		queue = queue[1:]
+
 		if !neighbor.Visited {
 			neighbor.Visited = true
 
-			neighborNeighbors := findNeighbors(kdTree, points, neighbor, epsilon, algorithm)
+			neighborNeighbors := computedNeighbors[neighbor]
 
 			if len(neighborNeighbors) >= minPts-1 {
-				neighbors = union(neighbors, neighborNeighbors)
+				queue = append(queue, neighborNeighbors...)
 			}
 		}
 
@@ -173,17 +215,24 @@ func expandCluster(kdTree *kdtree.Node, points []*EuclideanPoint, point *Euclide
 func union(a, b []*EuclideanPoint) []*EuclideanPoint {
 	m := make(map[*EuclideanPoint]bool)
 
+	// First pass to fill the map with unique elements from a and add them to result
+	result := make([]*EuclideanPoint, 0, len(a)+len(b))
 	for _, item := range a {
-		m[item] = true
-	}
-
-	for _, item := range b {
-		if _, ok := m[item]; !ok {
-			a = append(a, item)
+		if !m[item] {
+			m[item] = true
+			result = append(result, item)
 		}
 	}
 
-	return a
+	// Second pass to add unique elements from b to result
+	for _, item := range b {
+		if !m[item] {
+			m[item] = true
+			result = append(result, item)
+		}
+	}
+
+	return result
 }
 
 func main() {}

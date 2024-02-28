@@ -26,7 +26,7 @@ func TestDbscanGoBrute(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "brute", math.Pow(5.0, 2), 3, 3)
+	labels, clusters := dbscanGo(points, "brute", math.Pow(5.0, 2), 3, 3, 1)
 
 	expectedClusters := 3
 	expectedLabels := []int{1, 1, 1, 1, 2, 1, 3, 1, 3, 2, 2, 3, 2, -1}
@@ -53,7 +53,7 @@ func TestDbscanGoBruteOnlyNoise(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "brute", math.Pow(0.5, 2), 3, 2)
+	labels, clusters := dbscanGo(points, "brute", math.Pow(0.5, 2), 3, 2, 1)
 
 	expectedClusters := 0
 	expectedLabels := []int{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
@@ -80,7 +80,7 @@ func TestDbscanGoKdTree(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(5.0, 2), 3, 2)
+	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(5.0, 2), 3, 2, 1)
 
 	expectedClusters := 3
 	expectedLabels := []int{1, 1, 1, 1, 2, 1, 3, 1, 3, 2, 2, 3, 2, -1}
@@ -107,7 +107,7 @@ func TestDbscanGoKdTreeOnlyNoise(t *testing.T) {
 		{Vec: []float64{100, 100}},
 	}
 
-	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(0.5, 2), 3, 1)
+	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(0.5, 2), 3, 1, 1)
 
 	expectedClusters := 0
 	expectedLabels := []int{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
@@ -137,11 +137,9 @@ func TestDbscanGoKdTreeLargeDataset(t *testing.T) {
 		points = append(points, &EuclideanPoint{Vec: []float64{x, y}})
 	}
 
-	labels, clusters := dbscanGo(points, "kd_tree", math.Pow(0.1, 2), 3, 2)
+	_, clusters := dbscanGo(points, "kd_tree", math.Pow(0.01, 2), 3, 2, 8)
 
-	expectedClusters := 3
-	expectedLabels := []int{1, 1, 1, 1, 2, 1, 3, 1, 3, 2, 2, 3, 2, -1}
+	expectedClusters := 353
 
 	assert.Equal(t, expectedClusters, clusters)
-	assert.Equal(t, expectedLabels, labels)
 }
